@@ -5,6 +5,7 @@ import io
 from datetime import datetime
 import sys
 import os
+from ezdxf.addons import odafc
 
 # Add version and timestamp info
 VERSION = "1.1.0"
@@ -87,35 +88,32 @@ def crop_and_scale_pdf(pdf_bytes, crop_values, scale):
 # Function to convert DWG/DXF to PDF using a Python library
 def convert_dwg_to_pdf_lib(dwg_file_path):
     try:
-        import ezdxf
-        try:
-            doc = ezdxf.readfile(dwg_file_path)
-        except ezdxf.DXFError as e:
-            if "Not a DXF file" in str(e):
-                st.error(f"Error: The uploaded file '{os.path.basename(dwg_file_path)}' is not a valid DXF or DWG file that ezdxf can process.  Please upload a DXF file.")
-                return None
-            else:
-                st.error(f"Error reading DXF/DWG file: {e}")
-                return None
-
-        # Use a memory buffer instead of a file
-        buffer = io.BytesIO()
-
-        from ezdxf.addons import odafc
-        if not odafc.is_available:
-            st.error("Error: ODA File Converter is not available.  Please install it, or use a different DWG/DXF file.")
+        # Check if ODA File Converter is installed:
+        if not odafc.is_installed():
+            st.error("Error: ODA File Converter is not installed. Please install it, or use a DXF file.")
             return None
+
+        # Load the DWG/DXF file using the ODA File Converter support.
+        # This will convert the DWG to a temporary DXF internally.
+        doc = odafc.readfile(dwg_file_path)
+    except Exception as e:
+        st.error(f"Error reading DWG/DXF file: {str(e)}")
+        return None
+
+    try:
+        # Use a memory buffer to capture the exported PDF
+        buffer = io.BytesIO()
         odafc.export_pdf(doc, buffer)
         pdf_bytes = buffer.getvalue()
         return pdf_bytes
-
-    except ImportError:
-        st.error("Error: ezdxf library is required to convert DWG/DXF files. Please install it using 'pip install ezdxf'")
-        return None
-
     except Exception as e:
         st.error(f"An error occurred during DWG/DXF to PDF conversion: {str(e)}")
         return None
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
 
 
 
