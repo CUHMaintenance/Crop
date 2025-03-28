@@ -5,6 +5,7 @@ import io
 from datetime import datetime
 import sys
 import os
+import subprocess # For running the conversion command
 
 # Add version and timestamp info
 VERSION = "1.1.0"
@@ -84,6 +85,36 @@ def crop_and_scale_pdf(pdf_bytes, crop_values, scale):
         doc.close()
         output_pdf.close()
 
+# Function to convert DWG to PDF using a command-line tool (e.g., LibreCAD)
+def convert_dwg_to_pdf(dwg_file_path, output_dir):
+    try:
+        # Construct the command.  This assumes librecad is installed and in the system PATH
+        #  Important:  LibreCAD is just an example.  You might need to adapt this
+        #  to use a different tool (like a Python library, if one is available, or
+        #  another command-line utility).  The "-print" argument is NOT standard
+        #  and is just a placeholder.  Replace this with the correct command
+        #  for your chosen tool.
+        output_path = os.path.join(output_dir, "converted.pdf") # Fixed output filename
+        command = ["dxf2pdf", dwg_file_path, output_path] # Example using dxf2pdf
+
+        # Run the command.  Check the return code for success/failure.
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode != 0:
+            error_message = f"DWG to PDF conversion failed.  Error: {result.stderr}"
+            st.error(error_message)
+            return None  # Explicitly return None on failure
+
+        return output_path # Return the path to the created PDF
+
+    except FileNotFoundError:
+        error_message = "Error: dxf2pdf command not found.  Please ensure you have installed the required DWG conversion tool and that it is in your system's PATH."
+        st.error(error_message)
+        return None
+    except Exception as e:
+        error_message = f"An error occurred during DWG to PDF conversion: {str(e)}"
+        st.error(error_message)
+        return None
+
 # Streamlit UI
 st.set_page_config(page_title="Maggie's PDF App", layout="wide")
 
@@ -96,7 +127,50 @@ with st.expander("App Information"):
     - **Created by:** {CURRENT_USER}
     """)
 
-uploaded_file = st.file_uploader("📁 Upload a PDF", type=["pdf"])
+# --- DWG to PDF Conversion Section ---
+st.header("DWG to PDF Conversion") # Added Header for DWG conversion
+dwg_file = st.file_uploader("📁 Upload a DWG file", type=["dwg", "dxf"]) # added dxf
+
+if dwg_file:
+    # Create a temporary directory for the conversion
+    temp_dir = "temp_dwg_conversion"
+    if not os.path.exists(temp_dir):
+        os.makedirs(temp_dir)
+
+    # Save the uploaded DWG file to the temporary directory
+    dwg_file_path = os.path.join(temp_dir, dwg_file.name)
+    with open(dwg_file_path, "wb") as f:
+        f.write(dwg_file.read())
+
+    if st.button("Convert DWG to PDF"):
+        with st.spinner("Converting DWG to PDF..."):
+            pdf_path = convert_dwg_to_pdf(dwg_file_path, temp_dir) # Pass temp_dir
+
+        if pdf_path:
+            # Offer the converted PDF for download
+            with open(pdf_path, "rb") as pdf_file:
+                pdf_bytes = pdf_file.read()
+            st.success("DWG converted to PDF successfully!")
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            download_filename = f"converted_dwg_{timestamp}.pdf"
+            st.download_button(
+                label="Download Converted PDF",
+                data=pdf_bytes,
+                file_name=download_filename,
+                mime="application/pdf",
+            )
+        else:
+            st.error("DWG to PDF conversion failed.")
+
+    # Clean up the temporary file
+    if os.path.exists(dwg_file_path): # Check if file exists before attempting to delete
+        os.remove(dwg_file_path)
+    if os.path.exists(temp_dir):
+        os.rmdir(temp_dir) # Remove the directory
+
+# --- Existing PDF Processing Section ---
+st.header("PDF Processing") # Ensure the sections have distinct headers.
+uploaded_file = st.file_uploader("📁 Upload a PDF to process", type=["pdf"])
 
 if uploaded_file:
     pdf_bytes = uploaded_file.read()
@@ -136,10 +210,10 @@ if uploaded_file:
             cropped_img = cropped_img.resize((new_width_preview, new_height_preview), Image.LANCZOS)
 
             # Display preview
-            st.image(cropped_img, caption="Cropped and Scaled Preview",use_container_width=True)
+            st.image(cropped_img, caption="Cropped and Scaled Preview", use_container_width=True)
 
             # Process PDF button
-            if st.sidebar.button("Apply Crop"):
+            if st.sidebar.button("Apply Crop and Scale"): # Changed button text
                 with st.spinner("Processing..."):
                     # Apply the same crop and scale logic to the PDF
                     output_pdf_bytes = crop_and_scale_pdf(pdf_bytes, (left, top, right, bottom), scale)
