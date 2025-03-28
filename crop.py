@@ -88,7 +88,16 @@ def crop_and_scale_pdf(pdf_bytes, crop_values, scale):
 def convert_dwg_to_pdf_lib(dwg_file_path):
     try:
         import ezdxf
-        doc = ezdxf.readfile(dwg_file_path)
+        try:
+            doc = ezdxf.readfile(dwg_file_path)
+        except ezdxf.DXFError as e:
+            if "Not a DXF file" in str(e):
+                st.error(f"Error: The uploaded file '{os.path.basename(dwg_file_path)}' is not a valid DXF or DWG file that ezdxf can process.  Please upload a DXF file, or a DWG file that is compatible with ezdxf.")
+                return None
+            else:
+                st.error(f"Error reading DXF/DWG file: {e}")
+                return None
+
         # Use a memory buffer instead of a file
         buffer = io.BytesIO()
 
@@ -103,9 +112,7 @@ def convert_dwg_to_pdf_lib(dwg_file_path):
     except ImportError:
         st.error("Error: ezdxf library is required to convert DWG/DXF files. Please install it using 'pip install ezdxf'")
         return None
-    except ezdxf.DXFError as e:
-        st.error(f"Error reading DXF/DWG file: {e}")
-        return None
+
     except Exception as e:
         st.error(f"An error occurred during DWG/DXF to PDF conversion: {str(e)}")
         return None
@@ -195,20 +202,14 @@ elif app_mode == "Convert DWG/DXF to PDF":
     dwg_file = st.file_uploader("📁 Upload a DWG or DXF file", type=["dwg", "dxf"])
 
     if dwg_file:
-        # No need for a temp dir,  ezdxf reads directly from the uploaded file
-        #   or a path.
-        # temp_dir = "temp_dwg_conversion"
-        # if not os.path.exists(temp_dir):
-        #     os.makedirs(temp_dir)
-        dwg_file_path = dwg_file.name # Pass the name
+        dwg_file_path = dwg_file.name
 
-        # Save the file
         with open(dwg_file_path, "wb") as f:
             f.write(dwg_file.read())
 
         if st.button("Convert to PDF"):
             with st.spinner("Converting..."):
-                pdf_bytes = convert_dwg_to_pdf_lib(dwg_file_path) # Pass the path
+                pdf_bytes = convert_dwg_to_pdf_lib(dwg_file_path)
 
             if pdf_bytes:
                 st.success("DWG/DXF converted to PDF successfully!")
@@ -222,10 +223,8 @@ elif app_mode == "Convert DWG/DXF to PDF":
                 )
             else:
                 st.error("Conversion failed.")
-        # Clean up the file.
         if os.path.exists(dwg_file_path):
             os.remove(dwg_file_path)
-
 
 # Footer
 st.markdown("---")
