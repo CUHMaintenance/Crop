@@ -5,11 +5,13 @@ import io
 from datetime import datetime
 import sys
 import os
+import subprocess
+import tempfile
 
 # Add version and timestamp info
-VERSION = "1.1.0"
-LAST_UPDATED = "2025-03-27 16:59:43"
-CURRENT_USER = "Dave Maher"
+VERSION = "1.2.0"
+LAST_UPDATED = "2025-03-28 14:05:32"
+CURRENT_USER = "CUHMaintenance"
 
 # Function to render PDF pages as images
 def pdf_to_images(pdf_bytes):
@@ -84,6 +86,53 @@ def crop_and_scale_pdf(pdf_bytes, crop_values, scale):
         doc.close()
         output_pdf.close()
 
+def convert_dwg_to_pdf(dwg_file_path):
+    try:
+        # Create a temporary directory for conversion
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Get the filename without extension
+            filename = os.path.splitext(os.path.basename(dwg_file_path))[0]
+            output_pdf = os.path.join(temp_dir, f"{filename}.pdf")
+            
+            # Check if ODA File Converter is installed and in PATH
+            oda_path = "ODAFileConverter"  # Update this path to your ODA File Converter installation
+            
+            try:
+                # Command to convert DWG to PDF using ODA File Converter
+                cmd = [
+                    oda_path,
+                    os.path.dirname(dwg_file_path),  # Input directory
+                    temp_dir,  # Output directory
+                    "ACAD2018",  # Input version
+                    "PDF",  # Output format
+                    "1",  # Audit flag
+                    "1"   # Input file type (1 for all files)
+                ]
+                
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                stdout, stderr = process.communicate()
+                
+                if process.returncode != 0:
+                    st.error(f"Conversion failed: {stderr.decode()}")
+                    return None
+                
+                # Read the converted PDF
+                if os.path.exists(output_pdf):
+                    with open(output_pdf, 'rb') as pdf_file:
+                        return pdf_file.read()
+                else:
+                    st.error("Conversion failed: Output PDF not found")
+                    return None
+                    
+            except FileNotFoundError:
+                st.error("Error: ODA File Converter not found. Please make sure it's installed and added to PATH")
+                st.info("You can download ODA File Converter from: https://www.opendesign.com/guestfiles/oda_file_converter")
+                return None
+                
+    except Exception as e:
+        st.error(f"An error occurred during conversion: {str(e)}")
+        return None
+
 # Streamlit UI
 st.set_page_config(page_title="Maggie's PDF App", layout="wide")
 
@@ -96,72 +145,113 @@ with st.expander("App Information"):
     - **Created by:** {CURRENT_USER}
     """)
 
-uploaded_file = st.file_uploader("📁 Upload a PDF", type=["pdf"])
+# --- Main App Structure ---
+app_mode = st.sidebar.radio("Choose Mode", ["Process PDF", "Convert DWG/DXF to PDF"])
 
-if uploaded_file:
-    pdf_bytes = uploaded_file.read()
-    images, doc = pdf_to_images(pdf_bytes)
+if app_mode == "Process PDF":
+    st.header("PDF Processing")
+    uploaded_file = st.file_uploader("📁 Upload a PDF to process", type=["pdf"])
 
-    if len(images) > 0:
-        # Sidebar controls
-        st.sidebar.header("⚙ Controls")
-        
-        # Page selection
-        if len(images) > 1:
-            page_idx = st.sidebar.slider("Select Page", 0, len(images) - 1, 0)
+    if uploaded_file:
+        pdf_bytes = uploaded_file.read()
+        images, doc = pdf_to_images(pdf_bytes)
+
+        if len(images) > 0:
+            # Sidebar controls
+            st.sidebar.header("⚙ Controls")
+            
+            # Page selection
+            if len(images) > 1:
+                page_idx = st.sidebar.slider("Select Page", 0, len(images) - 1, 0)
+            else:
+                page_idx = 0
+            img = images[page_idx]
+
+            # Crop settings
+            width, height = img.size
+            st.sidebar.subheader("Crop Settings")
+            left = st.sidebar.slider("Left Crop", 0, width, 0)
+            top = st.sidebar.slider("Top Crop", 0, height, 0)
+            right = st.sidebar.slider("Right Crop", 0, width, width)
+            bottom = st.sidebar.slider("Bottom Crop", 0, height, height)
+
+            # Scaling factor
+            st.sidebar.subheader("Scale Settings")
+            scale = st.sidebar.slider("Scale Factor", 0.5, 2.0, 1.0, 0.1)
+
+            # Main content area
+            st.header("Preview")
+            try:
+                cropped_img = img.crop((left, top, right, bottom))
+                new_width_preview = int((right - left) * scale)
+                new_height_preview = int((bottom - top) * scale)
+                cropped_img = cropped_img.resize((new_width_preview, new_height_preview), Image.LANCZOS)
+
+                # Display preview
+                st.image(cropped_img, caption="Cropped and Scaled Preview", use_container_width=True)
+
+                # Process PDF button
+                if st.sidebar.button("Apply Crop and Scale"):
+                    with st.spinner("Processing..."):
+                        output_pdf_bytes = crop_and_scale_pdf(pdf_bytes, (left, top, right, bottom), scale)
+                        if output_pdf_bytes:
+                            st.success("PDF Cropped & Scaled Successfully!")
+                            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                            download_filename = f"cropped_pdf_{timestamp}.pdf"
+                            st.sidebar.download_button(
+                                "Download Cropped PDF",
+                                output_pdf_bytes,
+                                download_filename,
+                                "application/pdf"
+                            )
+
+            except Exception as e:
+                st.error(f"Error in preview: {str(e)}")
+                st.error(f"Error details: {str(sys.exc_info())}")
         else:
-            page_idx = 0
-        img = images[page_idx]
+            st.error("No pages found in the uploaded PDF. Please upload a valid PDF file.")
 
-        # Crop settings
-        width, height = img.size
-        st.sidebar.subheader("Crop Settings")
-        left = st.sidebar.slider("Left Crop", 0, width, 0)
-        top = st.sidebar.slider("Top Crop", 0, height, 0)
-        right = st.sidebar.slider("Right Crop", 0, width, width)
-        bottom = st.sidebar.slider("Bottom Crop", 0, height, height)
+elif app_mode == "Convert DWG/DXF to PDF":
+    st.header("DWG/DXF to PDF Conversion")
+    
+    # Add information about requirements
+    with st.expander("ℹ️ Requirements"):
+        st.markdown("""
+        To convert DWG files, you need:
+        1. ODA File Converter installed on your system
+        2. ODA File Converter added to your system's PATH
+        
+        [Download ODA File Converter here](https://www.opendesign.com/guestfiles/oda_file_converter)
+        """)
+    
+    dwg_file = st.file_uploader("📁 Upload a DWG or DXF file", type=["dwg", "dxf"])
 
-        # Scaling factor
-        st.sidebar.subheader("Scale Settings")
-        scale = st.sidebar.slider("Scale Factor", 0.5, 2.0, 1.0, 0.1)
+    if dwg_file:
+        # Create a temporary file to store the uploaded DWG
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.dwg') as tmp_file:
+            tmp_file.write(dwg_file.getvalue())
+            dwg_file_path = tmp_file.name
 
-
-        # Main content area
-        st.header("Preview")
-        # Crop and scale the image for preview
         try:
-            cropped_img = img.crop((left, top, right, bottom))
-            new_width_preview = int((right - left) * scale)
-            new_height_preview = int((bottom - top) * scale)
-            cropped_img = cropped_img.resize((new_width_preview, new_height_preview), Image.LANCZOS)
+            if st.button("Convert to PDF"):
+                with st.spinner("Converting DWG to PDF..."):
+                    pdf_bytes = convert_dwg_to_pdf(dwg_file_path)
 
-            # Display preview
-            st.image(cropped_img, caption="Cropped and Scaled Preview",use_container_width=True)
-
-            # Process PDF button
-            if st.sidebar.button("Apply Crop"):
-                with st.spinner("Processing..."):
-                    # Apply the same crop and scale logic to the PDF
-                    output_pdf_bytes = crop_and_scale_pdf(pdf_bytes, (left, top, right, bottom), scale)
-                    if output_pdf_bytes:
-                        st.success("PDF Cropped & Scaled Successfully!")
-                        # Generate timestamp for filename
-                        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-                        download_filename = f"cropped_pdf_{timestamp}.pdf"
-                        st.sidebar.download_button(
-                            "Download Cropped PDF",
-                            output_pdf_bytes,
-                            download_filename,
-                            "application/pdf"
-                        )
-
-        except Exception as e:
-            st.error(f"Error in preview: {str(e)}")
-            st.error(f"Error details: {str(sys.exc_info())}")
-
-    else:
-        st.error("No pages found in the uploaded PDF. Please upload a valid PDF file.")
+                if pdf_bytes:
+                    st.success("DWG converted to PDF successfully!")
+                    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+                    download_filename = f"converted_{timestamp}.pdf"
+                    st.download_button(
+                        label="Download Converted PDF",
+                        data=pdf_bytes,
+                        file_name=download_filename,
+                        mime="application/pdf",
+                    )
+        finally:
+            # Clean up the temporary file
+            if os.path.exists(dwg_file_path):
+                os.remove(dwg_file_path)
 
 # Footer
 st.markdown("---")
-st.markdown("Created by Dave Maher")
+st.markdown(f"Created by {CURRENT_USER}")
