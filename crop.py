@@ -5,7 +5,6 @@ import io
 from datetime import datetime
 import sys
 import os
-import subprocess  # For running the conversion command
 
 # Add version and timestamp info
 VERSION = "1.1.0"
@@ -85,28 +84,33 @@ def crop_and_scale_pdf(pdf_bytes, crop_values, scale):
         doc.close()
         output_pdf.close()
 
-# Function to convert DWG to PDF using a command-line tool
-def convert_dwg_to_pdf(dwg_file_path, output_dir):
+# Function to convert DWG/DXF to PDF using a Python library
+def convert_dwg_to_pdf_lib(dwg_file_path):
     try:
-        output_path = os.path.join(output_dir, "converted.pdf")
-        command = ["dxf2pdf", dwg_file_path, output_path]  # Example using dxf2pdf
+        import ezdxf
+        doc = ezdxf.readfile(dwg_file_path)
+        # Use a memory buffer instead of a file
+        buffer = io.BytesIO()
 
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode != 0:
-            error_message = f"DWG to PDF conversion failed. Error: {result.stderr}"
-            st.error(error_message)
+        from ezdxf.addons import odafc
+        if not odafc.is_available:
+            st.error("Error: ODA File Converter is not available.  Please install it, or use a different DWG/DXF file.")
             return None
+        odafc.export_pdf(doc, buffer)
+        pdf_bytes = buffer.getvalue()
+        return pdf_bytes
 
-        return output_path
-
-    except FileNotFoundError:
-        error_message = "Error: dxf2pdf command not found. Please ensure you have installed the required DWG conversion tool and that it is in your system's PATH."
-        st.error(error_message)
+    except ImportError:
+        st.error("Error: ezdxf library is required to convert DWG/DXF files. Please install it using 'pip install ezdxf'")
+        return None
+    except ezdxf.DXFError as e:
+        st.error(f"Error reading DXF/DWG file: {e}")
         return None
     except Exception as e:
-        error_message = f"An error occurred during DWG to PDF conversion: {str(e)}"
-        st.error(error_message)
+        st.error(f"An error occurred during DWG/DXF to PDF conversion: {str(e)}")
         return None
+
+
 
 # Streamlit UI
 st.set_page_config(page_title="Maggie's PDF App", layout="wide")
@@ -191,21 +195,22 @@ elif app_mode == "Convert DWG/DXF to PDF":
     dwg_file = st.file_uploader("📁 Upload a DWG or DXF file", type=["dwg", "dxf"])
 
     if dwg_file:
-        temp_dir = "temp_dwg_conversion"
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
+        # No need for a temp dir,  ezdxf reads directly from the uploaded file
+        #   or a path.
+        # temp_dir = "temp_dwg_conversion"
+        # if not os.path.exists(temp_dir):
+        #     os.makedirs(temp_dir)
+        dwg_file_path = dwg_file.name # Pass the name
 
-        dwg_file_path = os.path.join(temp_dir, dwg_file.name)
+        # Save the file
         with open(dwg_file_path, "wb") as f:
             f.write(dwg_file.read())
 
         if st.button("Convert to PDF"):
             with st.spinner("Converting..."):
-                pdf_path = convert_dwg_to_pdf(dwg_file_path, temp_dir)
+                pdf_bytes = convert_dwg_to_pdf_lib(dwg_file_path) # Pass the path
 
-            if pdf_path:
-                with open(pdf_path, "rb") as pdf_file:
-                    pdf_bytes = pdf_file.read()
+            if pdf_bytes:
                 st.success("DWG/DXF converted to PDF successfully!")
                 timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
                 download_filename = f"converted_{timestamp}.pdf"
@@ -217,12 +222,10 @@ elif app_mode == "Convert DWG/DXF to PDF":
                 )
             else:
                 st.error("Conversion failed.")
-
-        # Clean up
+        # Clean up the file.
         if os.path.exists(dwg_file_path):
             os.remove(dwg_file_path)
-        if os.path.exists(temp_dir):
-            os.rmdir(temp_dir)
+
 
 # Footer
 st.markdown("---")
