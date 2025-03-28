@@ -92,7 +92,7 @@ def convert_dwg_to_pdf_lib(dwg_file_path):
             doc = ezdxf.readfile(dwg_file_path)
         except ezdxf.DXFError as e:
             if "Not a DXF file" in str(e):
-                st.error(f"Error: The uploaded file '{os.path.basename(dwg_file_path)}' is not a valid DXF or DWG file that ezdxf can process.  Please upload a DXF file, or a DWG file that is compatible with ezdxf.")
+                st.error(f"Error: The uploaded file '{os.path.basename(dwg_file_path)}' is not a valid DXF or DWG file that ezdxf can process.  Please upload a DXF file.")
                 return None
             else:
                 st.error(f"Error reading DXF/DWG file: {e}")
